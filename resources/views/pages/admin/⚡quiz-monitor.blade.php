@@ -87,7 +87,7 @@ new class extends Component
 
         // Tampilkan leaderboard HANYA JIKA kuis sudah selesai dikalkulasi
         if ($this->quizStatus === 'finished') {
-            $this->leaderboard = Participant::orderBy('total_score', 'desc')->take(10)->get();
+            $this->leaderboard = Participant::orderBy('total_score', 'desc')->get();
         }
     }
 
