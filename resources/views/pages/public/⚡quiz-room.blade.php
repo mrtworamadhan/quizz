@@ -6,12 +6,17 @@ use App\Models\QuizState;
 use App\Models\Question;
 use App\Models\Answer;
 use Illuminate\Support\Facades\Session;
-use Illuminate\Support\Facades\Cache;
 
 new class extends Component {
     public $participant;
     public $quizStatus = 'waiting';
-    public $currentQuestion = null;
+    
+    // VARIABEL PRIMITIF PENGGANTI MODEL (ANTI ERROR SERIALIZE)
+    public $q_id = null;
+    public $q_order = null;
+    public $q_text = null;
+    public $q_options = [];
+    
     public $questionStartTime;
     public $timeLeft = 0;
     public $selectedOption = null;
@@ -39,12 +44,10 @@ new class extends Component {
     {
         if ($this->quizStatus !== 'waiting') return;
 
-        $this->quizStatus = Cache::remember('quiz_state_status', 3, function () {
-            $state = QuizState::find(1);
-            return $state ? $state->status : 'waiting';
-        });
+        $state = QuizState::find(1);
+        $this->quizStatus = $state ? $state->status : 'waiting';
 
-        if ($this->quizStatus === 'started' && !$this->currentQuestion) {
+        if ($this->quizStatus === 'started' && !$this->q_id) {
             $this->loadNextQuestion();
         }
     }
@@ -57,11 +60,11 @@ new class extends Component {
         $completedAnswersCount = $this->participant->answers()->whereNotNull('time_taken_ms')->count();
         $nextOrder = $completedAnswersCount + 1;
 
-        $this->currentQuestion = Cache::remember('question_order_' . $nextOrder, 3600, function () use ($nextOrder) {
-            return Question::where('order', $nextOrder)->first();
-        });
+        // 1. Ambil data segar dari Database ke variabel lokal
+        $question = Question::where('order', $nextOrder)->first();
 
-        if (!$this->currentQuestion) {
+        // 2. Jika soal sudah habis
+        if (!$question) {
             $finalScore = $this->participant->answers()->sum('score_awarded');
             
             $this->participant->update([
@@ -73,24 +76,31 @@ new class extends Component {
             return;
         }
 
+        // 3. Pindahkan datanya ke variabel primitif Livewire (SANGAT AMAN)
+        $this->q_id = $question->id;
+        $this->q_order = $question->order;
+        $this->q_text = $question->question_text;
+        $this->q_options = $question->options;
+
+        // 4. Gunakan variabel lokal ($question) untuk query, bukan variabel Livewire
         $draftAnswer = Answer::where('participant_id', $this->participant->id)
-            ->where('question_id', $this->currentQuestion->id)
+            ->where('question_id', $question->id)
             ->first();
 
         if (!$draftAnswer) {
             $draftAnswer = Answer::create([
                 'participant_id' => $this->participant->id,
-                'question_id' => $this->currentQuestion->id,
+                'question_id' => $question->id,
                 'started_at' => now(),
             ]);
-            $this->timeLeft = $this->currentQuestion->time_limit_seconds;
+            $this->timeLeft = $question->time_limit_seconds;
             $this->questionStartTime = microtime(true);
         } else {
             $timePassedSeconds = $draftAnswer->started_at->diffInSeconds(now());
-            $calculatedTimeLeft = $this->currentQuestion->time_limit_seconds - $timePassedSeconds;
+            $calculatedTimeLeft = $question->time_limit_seconds - $timePassedSeconds;
 
             if ($calculatedTimeLeft <= 0) {
-                $this->questionStartTime = microtime(true) - ($this->currentQuestion->time_limit_seconds);
+                $this->questionStartTime = microtime(true) - ($question->time_limit_seconds);
                 $this->submitAnswer(true);
                 return;
             } else {
@@ -102,10 +112,14 @@ new class extends Component {
 
     public function submitAnswer($isForced = false)
     {
-        if (!$this->currentQuestion) return;
+        if (!$this->q_id) return;
+
+        // Tarik ulang dari database berdasarkan ID agar 100% akurat dan kebal hack
+        $question = Question::find($this->q_id);
+        if (!$question) return;
 
         $draftAnswer = Answer::where('participant_id', $this->participant->id)
-            ->where('question_id', $this->currentQuestion->id)
+            ->where('question_id', $question->id)
             ->first();
 
         if (!$draftAnswer || $draftAnswer->time_taken_ms !== null) return;
@@ -115,13 +129,13 @@ new class extends Component {
 
         $isCorrect = false;
         $score = 0;
-        $maxTimeMs = $this->currentQuestion->time_limit_seconds * 1000;
+        $maxTimeMs = $question->time_limit_seconds * 1000;
 
         if ($timeTakenMs > $maxTimeMs) {
             $timeTakenMs = $maxTimeMs;
         }
 
-        if (!$isForced && $this->selectedOption !== null && $this->selectedOption == $this->currentQuestion->correct_answer) {
+        if (!$isForced && $this->selectedOption !== null && $this->selectedOption == $question->correct_answer) {
             $isCorrect = true;
             $speedBonus = 0;
             if ($timeTakenMs < $maxTimeMs) {
@@ -159,13 +173,14 @@ new class extends Component {
             </div>
         </div>
 
-    @elseif($quizStatus === 'started' && $currentQuestion)
-        <div wire:key="question-{{ $currentQuestion->id }}" x-data="{ localSelected: null }" class="max-w-3xl mx-auto mt-4 md:mt-10 mb-20">
+    <!-- Perhatikan perubahan variabel di sini (menggunakan $q_id) -->
+    @elseif($quizStatus === 'started' && $q_id)
+        <div wire:key="question-{{ $q_id }}" x-data="{ localSelected: null }" class="max-w-3xl mx-auto mt-4 md:mt-10 mb-20">
             <div class="bg-white rounded-2xl shadow-lg overflow-hidden border-t-8 border-orange-500">
                 
                 <div class="bg-gray-50 p-6 border-b flex flex-col md:flex-row justify-between items-center gap-4">
                     <span class="text-lg font-black text-gray-700 bg-gray-200 px-4 py-2 rounded-lg">
-                        Soal No. {{ $currentQuestion->order }}
+                        Soal No. {{ $q_order }}
                     </span>
                     <div x-data="{ seconds: {{ $timeLeft }}, interval: null }" x-init="
                         clearInterval(interval);
@@ -184,10 +199,10 @@ new class extends Component {
 
                 <div class="p-6 md:p-8">
                     <h2 class="text-xl md:text-2xl font-bold text-gray-800 mb-8 leading-relaxed">
-                        {{ $currentQuestion->question_text }}
+                        {{ $q_text }}
                     </h2>
                     <div class="grid grid-cols-1 gap-4">
-                        @foreach($currentQuestion->options as $key => $optionText)
+                        @foreach($q_options as $key => $optionText)
                             <button @click="localSelected = '{{ $key }}'" 
                                     class="w-full text-left p-4 md:p-5 rounded-xl border-2 transition-all duration-200 group flex items-center"
                                     :class="localSelected === '{{ $key }}' ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200' : 'border-gray-200 hover:border-orange-300 hover:bg-gray-50'">
@@ -215,9 +230,8 @@ new class extends Component {
             </div>
         </div>
 
-        @elseif($quizStatus === 'finished')
+    @elseif($quizStatus === 'finished')
         <div class="flex flex-col items-center justify-center min-h-[80vh] py-10">
-            
             <div class="bg-white p-8 rounded-2xl shadow-xl text-center max-w-2xl w-full border-t-8 border-green-500 mb-8">
                 <h1 class="text-4xl font-black text-green-600 mb-4">Selesai!</h1>
                 <p class="text-gray-600 text-lg mb-6">Kerja bagus, <span class="font-bold">{{ $participant->name }}</span>! Kamu telah menyelesaikan semua soal.</p>
@@ -245,10 +259,8 @@ new class extends Component {
                     @forelse($recapAnswers as $ans)
                         @php
                             $options = $ans->question->options ?? [];
-                            
                             $userKey = $ans->submitted_answer;
                             $userText = $userKey ? ($userKey . '. ' . ($options[$userKey] ?? '')) : 'Kosong / Waktu Habis';
-                            
                             $correctKey = $ans->question->correct_answer;
                             $correctText = $correctKey ? ($correctKey . '. ' . ($options[$correctKey] ?? '')) : '-';
                         @endphp
@@ -260,7 +272,6 @@ new class extends Component {
                             </p>
                             
                             <div class="flex flex-col md:flex-row md:items-start gap-3 text-sm">
-                                
                                 <div class="flex flex-col md:flex-row md:items-center gap-2 flex-1">
                                     <span class="font-semibold text-gray-500 whitespace-nowrap mt-1 md:mt-0">Jawaban Kamu:</span>
                                     @if($ans->is_correct)
@@ -291,17 +302,13 @@ new class extends Component {
                             </div>
                         </div>
                     @empty
-                        <div class="py-8 text-center text-gray-500 font-bold">
-                            Belum ada jawaban yang tercatat.
-                        </div>
+                        <div class="py-8 text-center text-gray-500 font-bold">Belum ada jawaban yang tercatat.</div>
                     @endforelse
                 </div>
-                
                 <div class="bg-gray-50 p-4 text-center border-t">
                     <p class="text-sm text-gray-400 italic">"Bawaslu Siap, Generasi Sigap"</p>
                 </div>
             </div>
-
         </div>
     @endif
 </div>
