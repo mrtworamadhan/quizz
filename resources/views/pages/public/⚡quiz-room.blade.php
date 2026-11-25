@@ -218,7 +218,6 @@ new class extends Component {
         @elseif($quizStatus === 'finished')
         <div class="flex flex-col items-center justify-center min-h-[80vh] py-10">
             
-            <!-- KARTU SKOR AKHIR -->
             <div class="bg-white p-8 rounded-2xl shadow-xl text-center max-w-2xl w-full border-t-8 border-green-500 mb-8">
                 <h1 class="text-4xl font-black text-green-600 mb-4">Selesai!</h1>
                 <p class="text-gray-600 text-lg mb-6">Kerja bagus, <span class="font-bold">{{ $participant->name }}</span>! Kamu telah menyelesaikan semua soal.</p>
@@ -228,14 +227,12 @@ new class extends Component {
                 </div>
             </div>
 
-            <!-- KARTU REKAP DETAIL JAWABAN -->
             <div class="w-full max-w-2xl bg-white rounded-2xl shadow-lg overflow-hidden">
                 <div class="bg-gray-800 p-5 text-center">
                     <h2 class="text-xl font-bold text-white">Detail Jawaban Kamu</h2>
                 </div>
                 
                 <div class="p-4 md:p-6 divide-y divide-gray-200">
-                    <!-- Kita gunakan PHP murni di sini agar tidak membebani state Livewire -->
                     @php
                         $recapAnswers = App\Models\Answer::with('question')
                             ->where('participant_id', $participant->id)
@@ -246,40 +243,49 @@ new class extends Component {
                     @endphp
 
                     @forelse($recapAnswers as $ans)
+                        @php
+                            $options = $ans->question->options ?? [];
+                            
+                            $userKey = $ans->submitted_answer;
+                            $userText = $userKey ? ($userKey . '. ' . ($options[$userKey] ?? '')) : 'Kosong / Waktu Habis';
+                            
+                            $correctKey = $ans->question->correct_answer;
+                            $correctText = $correctKey ? ($correctKey . '. ' . ($options[$correctKey] ?? '')) : '-';
+                        @endphp
+
                         <div class="py-5">
-                            <p class="font-bold text-gray-700 mb-3 leading-relaxed">
+                            <p class="font-bold text-gray-700 mb-4 leading-relaxed">
                                 <span class="bg-gray-200 text-gray-800 px-2 py-1 rounded text-sm mr-2 shadow-sm">Soal {{ $ans->question->order ?? '-' }}</span>
                                 {{ $ans->question->question_text ?? 'Soal tidak ditemukan' }}
                             </p>
                             
-                            <div class="flex flex-col md:flex-row md:items-center gap-3 text-sm">
+                            <div class="flex flex-col md:flex-row md:items-start gap-3 text-sm">
                                 
-                                <!-- Status Jawaban Peserta -->
-                                <div class="flex items-center gap-2">
-                                    <span class="font-semibold text-gray-500">Jawaban Kamu:</span>
+                                <div class="flex flex-col md:flex-row md:items-center gap-2 flex-1">
+                                    <span class="font-semibold text-gray-500 whitespace-nowrap mt-1 md:mt-0">Jawaban Kamu:</span>
                                     @if($ans->is_correct)
-                                        <span class="bg-green-100 text-green-700 font-bold px-3 py-1.5 rounded-full flex items-center gap-1 shadow-sm">
-                                            ✓ {{ $ans->submitted_answer ?? 'Kosong/Waktu Habis' }}
-                                        </span>
+                                        <div class="bg-green-50 text-green-800 border border-green-200 px-3 py-2 rounded-lg flex items-start gap-2 shadow-sm w-full md:w-auto leading-relaxed">
+                                            <span class="font-black text-green-600 mt-0.5">✓</span> 
+                                            <span>{{ $userText }}</span>
+                                        </div>
                                     @else
-                                        <span class="bg-red-100 text-red-700 font-bold px-3 py-1.5 rounded-full flex items-center gap-1 shadow-sm">
-                                            ✗ {{ $ans->submitted_answer ?? 'Kosong/Waktu Habis' }}
-                                        </span>
+                                        <div class="bg-red-50 text-red-800 border border-red-200 px-3 py-2 rounded-lg flex items-start gap-2 shadow-sm w-full md:w-auto leading-relaxed">
+                                            <span class="font-black text-red-600 mt-0.5">✗</span> 
+                                            <span>{{ $userText }}</span>
+                                        </div>
                                     @endif
                                 </div>
 
-                                <!-- Kunci Jawaban (Hanya Muncul Jika Salah) -->
                                 @if(!$ans->is_correct)
-                                    <div class="flex items-center gap-2 md:ml-4 border-t md:border-t-0 md:border-l border-gray-200 pt-3 md:pt-0 md:pl-4 mt-1 md:mt-0">
-                                        <span class="font-semibold text-gray-500">Kunci:</span>
-                                        <span class="bg-blue-100 text-blue-700 font-bold px-3 py-1.5 rounded-full shadow-sm">
-                                            {{ $ans->question->correct_answer ?? '-' }}
-                                        </span>
+                                    <div class="flex flex-col md:flex-row md:items-center gap-2 flex-1 md:border-l border-gray-200 pt-3 md:pt-0 md:pl-4 mt-2 md:mt-0">
+                                        <span class="font-semibold text-gray-500 whitespace-nowrap mt-1 md:mt-0">Kunci:</span>
+                                        <div class="bg-blue-50 text-blue-800 border border-blue-200 px-3 py-2 rounded-lg shadow-sm w-full md:w-auto leading-relaxed">
+                                            {{ $correctText }}
+                                        </div>
                                     </div>
                                 @endif
                                 
-                                <!-- Poin yang Didapat -->
-                                <div class="md:ml-auto font-black text-right mt-2 md:mt-0 {{ $ans->score_awarded > 0 ? 'text-orange-500' : 'text-gray-400' }}">
+                                <div class="md:ml-auto font-black text-right mt-3 md:mt-0 {{ $ans->score_awarded > 0 ? 'text-orange-500' : 'text-gray-400' }}">
                                     +{{ $ans->score_awarded }} Poin
                                 </div>
                             </div>

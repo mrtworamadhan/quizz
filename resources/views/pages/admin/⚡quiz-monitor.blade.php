@@ -166,18 +166,22 @@ new class extends Component
         <div class="bg-white rounded-xl shadow-lg p-8">
             <div class="flex justify-between items-center mb-6 border-b pb-4">
                 <h2 class="text-2xl font-black text-gray-800">🏆 HASIL AKHIR & LEADERBOARD</h2>
-                <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-lg text-sm">Skor Telah Dikalkulasi</span>
+                <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-lg text-sm">
+                    Total: {{ count($leaderboard) }} Peserta
+                </span>
             </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
+            <!-- TABEL SCROLLABLE (Kunci Tinggi Maksimal & Header Sticky) -->
+            <div class="overflow-x-auto overflow-y-auto max-h-[65vh] border rounded-lg shadow-inner">
+                <table class="w-full text-left border-collapse relative">
+                    <!-- Tambahkan sticky, top-0, dan z-10 agar header tidak ikut ke-scroll -->
+                    <thead class="sticky top-0 z-10 shadow">
                         <tr class="bg-gray-800 text-white uppercase text-sm">
-                            <th class="p-4 rounded-tl-lg text-center">Rank</th>
+                            <th class="p-4 text-center">Rank</th>
                             <th class="p-4">Nama Peserta</th>
                             <th class="p-4">Asal Kelas</th>
                             <th class="p-4 text-right">Total Poin Akhir</th>
-                            <th class="p-4 text-center rounded-tr-lg">Aksi</th>
+                            <th class="p-4 text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -201,6 +205,7 @@ new class extends Component
                     </tbody>
                 </table>
             </div>
+
         </div>
     @endif
 
