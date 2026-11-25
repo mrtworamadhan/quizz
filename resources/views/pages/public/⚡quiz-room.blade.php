@@ -215,17 +215,87 @@ new class extends Component {
             </div>
         </div>
 
-    @elseif($quizStatus === 'finished')
-        <div class="flex flex-col items-center justify-center min-h-[80vh]">
-            <div class="bg-white p-10 rounded-2xl shadow-xl text-center max-w-lg w-full border-t-8 border-green-500">
+        @elseif($quizStatus === 'finished')
+        <div class="flex flex-col items-center justify-center min-h-[80vh] py-10">
+            
+            <!-- KARTU SKOR AKHIR -->
+            <div class="bg-white p-8 rounded-2xl shadow-xl text-center max-w-2xl w-full border-t-8 border-green-500 mb-8">
                 <h1 class="text-4xl font-black text-green-600 mb-4">Selesai!</h1>
-                <p class="text-gray-600 text-lg mb-6">Kerja bagus, {{ $participant->name }}! Kamu telah menyelesaikan kuis ini.</p>
-                <div class="bg-gray-100 rounded-lg p-6 mb-6">
+                <p class="text-gray-600 text-lg mb-6">Kerja bagus, <span class="font-bold">{{ $participant->name }}</span>! Kamu telah menyelesaikan semua soal.</p>
+                <div class="bg-gray-100 rounded-xl p-6">
                     <p class="text-sm text-gray-500 uppercase font-bold">Skor Akhir Kamu</p>
-                    <p class="text-5xl font-black text-gray-800 mt-2">{{ number_format($participant->total_score, 0, ',', '.') }}</p>
+                    <p class="text-6xl font-black text-gray-800 mt-2">{{ number_format($participant->total_score, 0, ',', '.') }}</p>
                 </div>
-                <p class="text-sm text-gray-400 italic">"Bawaslu Siap, Generasi Sigap"</p>
             </div>
+
+            <!-- KARTU REKAP DETAIL JAWABAN -->
+            <div class="w-full max-w-2xl bg-white rounded-2xl shadow-lg overflow-hidden">
+                <div class="bg-gray-800 p-5 text-center">
+                    <h2 class="text-xl font-bold text-white">Detail Jawaban Kamu</h2>
+                </div>
+                
+                <div class="p-4 md:p-6 divide-y divide-gray-200">
+                    <!-- Kita gunakan PHP murni di sini agar tidak membebani state Livewire -->
+                    @php
+                        $recapAnswers = App\Models\Answer::with('question')
+                            ->where('participant_id', $participant->id)
+                            ->get()
+                            ->sortBy(function($ans) {
+                                return $ans->question->order ?? 999;
+                            });
+                    @endphp
+
+                    @forelse($recapAnswers as $ans)
+                        <div class="py-5">
+                            <p class="font-bold text-gray-700 mb-3 leading-relaxed">
+                                <span class="bg-gray-200 text-gray-800 px-2 py-1 rounded text-sm mr-2 shadow-sm">Soal {{ $ans->question->order ?? '-' }}</span>
+                                {{ $ans->question->question_text ?? 'Soal tidak ditemukan' }}
+                            </p>
+                            
+                            <div class="flex flex-col md:flex-row md:items-center gap-3 text-sm">
+                                
+                                <!-- Status Jawaban Peserta -->
+                                <div class="flex items-center gap-2">
+                                    <span class="font-semibold text-gray-500">Jawaban Kamu:</span>
+                                    @if($ans->is_correct)
+                                        <span class="bg-green-100 text-green-700 font-bold px-3 py-1.5 rounded-full flex items-center gap-1 shadow-sm">
+                                            ✓ {{ $ans->submitted_answer ?? 'Kosong/Waktu Habis' }}
+                                        </span>
+                                    @else
+                                        <span class="bg-red-100 text-red-700 font-bold px-3 py-1.5 rounded-full flex items-center gap-1 shadow-sm">
+                                            ✗ {{ $ans->submitted_answer ?? 'Kosong/Waktu Habis' }}
+                                        </span>
+                                    @endif
+                                </div>
+
+                                <!-- Kunci Jawaban (Hanya Muncul Jika Salah) -->
+                                @if(!$ans->is_correct)
+                                    <div class="flex items-center gap-2 md:ml-4 border-t md:border-t-0 md:border-l border-gray-200 pt-3 md:pt-0 md:pl-4 mt-1 md:mt-0">
+                                        <span class="font-semibold text-gray-500">Kunci:</span>
+                                        <span class="bg-blue-100 text-blue-700 font-bold px-3 py-1.5 rounded-full shadow-sm">
+                                            {{ $ans->question->correct_answer ?? '-' }}
+                                        </span>
+                                    </div>
+                                @endif
+                                
+                                <!-- Poin yang Didapat -->
+                                <div class="md:ml-auto font-black text-right mt-2 md:mt-0 {{ $ans->score_awarded > 0 ? 'text-orange-500' : 'text-gray-400' }}">
+                                    +{{ $ans->score_awarded }} Poin
+                                </div>
+                            </div>
+                        </div>
+                    @empty
+                        <div class="py-8 text-center text-gray-500 font-bold">
+                            Belum ada jawaban yang tercatat.
+                        </div>
+                    @endforelse
+                </div>
+                
+                <div class="bg-gray-50 p-4 text-center border-t">
+                    <p class="text-sm text-gray-400 italic">"Bawaslu Siap, Generasi Sigap"</p>
+                </div>
+            </div>
+
         </div>
     @endif
 </div>
