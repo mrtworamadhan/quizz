@@ -4,24 +4,24 @@ use Livewire\Component;
 use App\Models\Participant;
 use App\Models\QuizState;
 use App\Models\Answer;
+use Illuminate\Support\Facades\DB;
 
 new class extends Component
 {
     public $quizStatus = 'waiting';
     public $participantCount = 0;
+    public $activeAnswersCount = 0;
     public $leaderboard = [];
     public $monitorToken;
 
-    public $showModal = false; // Mengontrol pop-up buka/tutup
-    public $selectedParticipant = null; // Menyimpan data peserta yang diklik
+    public $showModal = false;
+    public $selectedParticipant = null;
     public $participantAnswers = [];
 
     public function mount($token)
     {
-        // Cari data quiz state
         $state = QuizState::find(1);
 
-        // Validasi: Jika token di URL tidak sama dengan yang di database, blokir!
         if (!$state || $state->monitor_token !== $token) {
             abort(403, 'Akses Ditolak: Link monitor tidak valid atau token salah.');
         }
@@ -30,7 +30,6 @@ new class extends Component
         $this->refreshData();
     }
 
-    // Fungsi ini mengeksekusi perubahan status kuis
     public function startQuiz()
     {
         QuizState::updateOrCreate(
@@ -45,9 +44,22 @@ new class extends Component
         $this->refreshData();
     }
 
-    // Fungsi untuk menghentikan kuis (opsional untuk panitia)
-    public function stopQuiz()
+    public function calculateAndStopQuiz()
     {
+        // 1. Eksekusi perhitungan massal skor akhir untuk semua peserta
+        // Ini lebih aman dan cepat karena dilakukan dengan 1 query database (Bulk Update)
+        DB::statement('
+            UPDATE participants p
+            SET total_score = (
+                SELECT COALESCE(SUM(score_awarded), 0)
+                FROM answers a
+                WHERE a.participant_id = p.id
+            ),
+            finished_at = NOW()
+            WHERE finished_at IS NULL
+        ');
+
+        // 2. Ubah status kuis menjadi selesai
         QuizState::updateOrCreate(
             ['id' => 1],
             ['status' => 'finished']
@@ -59,8 +71,6 @@ new class extends Component
 
     public function refreshData()
     {
-        // Jangan lakukan auto-refresh (polling) secara berat jika modal sedang terbuka
-        // agar panitia nyaman membaca data detail tanpa layar berkedip.
         if ($this->showModal) return; 
 
         $state = QuizState::find(1);
@@ -70,30 +80,30 @@ new class extends Component
 
         $this->participantCount = Participant::count();
 
-        if ($this->quizStatus !== 'waiting') {
+        // Jika kuis sedang berjalan, hanya hitung total jawaban masuk agar UI tidak kaku
+        if ($this->quizStatus === 'started') {
+            $this->activeAnswersCount = Answer::count();
+        }
+
+        // Tampilkan leaderboard HANYA JIKA kuis sudah selesai dikalkulasi
+        if ($this->quizStatus === 'finished') {
             $this->leaderboard = Participant::orderBy('total_score', 'desc')->take(10)->get();
         }
     }
 
-    // --- FUNGSI BARU UNTUK MEMBUKA DETAIL ---
     public function viewDetails($participantId)
     {
-        // Cari data pesertanya
         $this->selectedParticipant = Participant::find($participantId);
         
         if ($this->selectedParticipant) {
-            // Ambil semua jawabannya. 
-            // Kita gunakan 'with("question")' agar tabel pertanyaan juga ikut terpanggil 
-            // sehingga kita bisa tahu urutan soal dan kunci jawabannya.
             $this->participantAnswers = Answer::with('question')
                 ->where('participant_id', $participantId)
                 ->get()
                 ->sortBy(function($answer) {
-                    // Urutkan berdasarkan nomor urut soal
                     return $answer->question->order; 
                 });
                 
-            $this->showModal = true; // Tampilkan Pop-up
+            $this->showModal = true;
         }
     }
 
@@ -106,11 +116,10 @@ new class extends Component
 };
 ?>
 
-<div class="min-h-screen bg-gray-100 p-8 font-sans" wire:poll.2s="refreshData">
+<div class="min-h-screen bg-gray-100 p-8 font-sans" wire:poll.5s="refreshData">
     
-    <!-- Header Admin/Monitor (Tetap sama seperti sebelumnya) -->
+    <!-- Header Admin/Monitor -->
     <div class="bg-white rounded-xl shadow p-6 mb-8 flex justify-between items-center border-l-8 border-blue-800">
-        <!-- ... kode header tidak ada yang berubah ... -->
         <div>
             <h1 class="text-3xl font-black text-gray-800">Control Room Kuis</h1>
             <p class="text-gray-500 font-bold">Bawaslu Siap, Generasi Sigap</p>
@@ -121,25 +130,43 @@ new class extends Component
         </div>
     </div>
 
-    <!-- KONDISI 1: SEBELUM MULAI (Tetap sama) -->
+    <!-- KONDISI 1: SEBELUM MULAI -->
     @if($quizStatus === 'waiting')
-        <!-- ... kode tombol Start ... -->
         <div class="flex flex-col items-center justify-center bg-white rounded-xl shadow-lg p-16 text-center h-[50vh]">
             <h2 class="text-2xl font-bold text-gray-700 mb-8">Kuis belum dimulai. Tunggu hingga semua peserta bergabung.</h2>
             <button wire:click="startQuiz" onclick="return confirm('Yakin ingin memulai kuis sekarang?')" class="bg-green-500 hover:bg-green-600 text-white font-black text-4xl py-6 px-16 rounded-2xl shadow-xl">
                 START KUIS SEKARANG
             </button>
         </div>
-    @else
-        <!-- KONDISI 2: SEDANG BERJALAN / SELESAI -->
+    
+    <!-- KONDISI 2: SEDANG BERJALAN -->
+    @elseif($quizStatus === 'started')
+        <div class="flex flex-col items-center justify-center bg-white rounded-xl shadow-lg p-16 text-center h-[50vh]">
+            
+            <div class="animate-pulse mb-8 flex justify-center">
+                <div class="w-24 h-24 border-8 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+            
+            <h2 class="text-3xl font-black text-gray-800 mb-2">KUIS SEDANG BERLANGSUNG</h2>
+            <p class="text-xl text-gray-600 mb-8">Harap tenang, peserta sedang mengerjakan soal...</p>
+            
+            <div class="bg-blue-50 px-8 py-4 rounded-xl border border-blue-100 mb-10">
+                <p class="text-sm text-blue-800 font-bold uppercase mb-1">Total Interaksi / Jawaban Masuk</p>
+                <p class="text-5xl font-black text-blue-600">{{ number_format($activeAnswersCount, 0, ',', '.') }}</p>
+            </div>
+
+            <button wire:click="calculateAndStopQuiz" wire:loading.attr="disabled" onclick="return confirm('Apakah waktu kuis sudah habis? Sistem akan merekap nilai semua peserta secara massal.')" class="bg-red-500 hover:bg-red-600 text-white font-black text-2xl py-4 px-10 rounded-xl shadow-lg transition-transform hover:-translate-y-1">
+                <span wire:loading.remove wire:target="calculateAndStopQuiz">HITUNG SKOR & AKHIRI KUIS</span>
+                <span wire:loading wire:target="calculateAndStopQuiz">MEMPROSES DATA... MOHON TUNGGU</span>
+            </button>
+        </div>
+
+    <!-- KONDISI 3: SELESAI (LEADERBOARD) -->
+    @elseif($quizStatus === 'finished')
         <div class="bg-white rounded-xl shadow-lg p-8">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-black text-gray-800">🏆 LEADERBOARD SEMENTARA</h2>
-                @if($quizStatus === 'started')
-                    <button wire:click="stopQuiz" onclick="return confirm('Hentikan kuis secara paksa?')" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg">
-                        Akhiri Kuis
-                    </button>
-                @endif
+            <div class="flex justify-between items-center mb-6 border-b pb-4">
+                <h2 class="text-2xl font-black text-gray-800">🏆 HASIL AKHIR & LEADERBOARD</h2>
+                <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-lg text-sm">Skor Telah Dikalkulasi</span>
             </div>
 
             <div class="overflow-x-auto">
@@ -149,8 +176,8 @@ new class extends Component
                             <th class="p-4 rounded-tl-lg text-center">Rank</th>
                             <th class="p-4">Nama Peserta</th>
                             <th class="p-4">Asal Kelas</th>
-                            <th class="p-4 text-right">Total Poin</th>
-                            <th class="p-4 text-center rounded-tr-lg">Aksi</th> <!-- Kolom Baru -->
+                            <th class="p-4 text-right">Total Poin Akhir</th>
+                            <th class="p-4 text-center rounded-tr-lg">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -162,12 +189,8 @@ new class extends Component
                                 <td class="p-4 text-right text-2xl font-black text-orange-600">
                                     {{ number_format($player->total_score, 0, ',', '.') }}
                                 </td>
-                                <!-- Tombol Aksi Baru -->
                                 <td class="p-4 text-center">
-                                    <button 
-                                        wire:click="viewDetails({{ $player->id }})"
-                                        class="bg-blue-100 hover:bg-blue-600 text-blue-700 hover:text-white font-bold py-1 px-4 rounded transition-colors text-sm"
-                                    >
+                                    <button wire:click="viewDetails({{ $player->id }})" class="bg-blue-100 hover:bg-blue-600 text-blue-700 hover:text-white font-bold py-1 px-4 rounded transition-colors text-sm">
                                         Lihat Detail
                                     </button>
                                 </td>
@@ -181,27 +204,18 @@ new class extends Component
         </div>
     @endif
 
-    <!-- ========================================== -->
-    <!-- POP-UP MODAL DETAIL JAWABAN PESERTA        -->
-    <!-- ========================================== -->
+    <!-- POP-UP MODAL DETAIL JAWABAN PESERTA -->
     @if($showModal && $selectedParticipant)
-        <!-- Overlay gelap yang menutupi layar -->
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4">
-            
-            <!-- Kotak Putih Modal -->
             <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
-                
-                <!-- Header Modal -->
                 <div class="bg-blue-800 text-white p-6 flex justify-between items-center">
                     <div>
                         <h3 class="text-2xl font-bold">Detail Jawaban: {{ $selectedParticipant->name }}</h3>
                         <p class="text-blue-200">{{ $selectedParticipant->class_name }} | Total Poin: <span class="font-bold text-white">{{ number_format($selectedParticipant->total_score, 0, ',', '.') }}</span></p>
                     </div>
-                    <!-- Tombol Tutup (X) -->
                     <button wire:click="closeModal" class="text-blue-200 hover:text-white font-bold text-3xl">&times;</button>
                 </div>
 
-                <!-- Isi Modal (Bisa di-scroll jika datanya panjang) -->
                 <div class="p-6 overflow-y-auto">
                     <table class="w-full text-left border-collapse">
                         <thead>
@@ -218,10 +232,8 @@ new class extends Component
                             @forelse($participantAnswers as $ans)
                                 <tr class="border-b hover:bg-gray-50">
                                     <td class="p-3 text-center font-bold text-gray-700">{{ $ans->question->order }}</td>
-                                    
                                     <td class="p-3 text-center font-bold text-gray-800">{{ $ans->submitted_answer ?? '-' }}</td>
                                     <td class="p-3 text-center text-gray-500">{{ $ans->question->correct_answer }}</td>
-                                    
                                     <td class="p-3 text-center">
                                         @if($ans->is_correct)
                                             <span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">BENAR</span>
@@ -229,12 +241,9 @@ new class extends Component
                                             <span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">SALAH</span>
                                         @endif
                                     </td>
-                                    
-                                    <!-- Konversi dari Milidetik (ms) ke Detik -->
                                     <td class="p-3 text-right text-gray-600">
                                         {{ number_format($ans->time_taken_ms / 1000, 1) }} s
                                     </td>
-                                    
                                     <td class="p-3 text-right font-bold {{ $ans->score_awarded > 0 ? 'text-green-600' : 'text-gray-400' }}">
                                         +{{ $ans->score_awarded }}
                                     </td>
@@ -248,13 +257,11 @@ new class extends Component
                     </table>
                 </div>
 
-                <!-- Footer Modal -->
                 <div class="bg-gray-50 p-4 border-t text-right">
                     <button wire:click="closeModal" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg transition-colors">
                         Tutup
                     </button>
                 </div>
-                
             </div>
         </div>
     @endif
