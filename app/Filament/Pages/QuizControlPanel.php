@@ -3,18 +3,20 @@
 namespace App\Filament\Pages;
 
 use BackedEnum;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Pages\Page;
 use Filament\Actions\Action;
 use App\Models\QuizState;
 use App\Models\Participant;
 use App\Models\Answer;
-use Filament\Infolists\Components\Section;
-use Filament\Infolists\Infolist; // Perbaikan: Gunakan Infolist class yang benar
+use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Filament\Notifications\Notification; // Pastikan Notification di-import di atas
+
+// Perbaikan Import Infolist Filament v3
+use Filament\Infolists\Infolist;
+use Filament\Schemas\Components\Section;
+use Filament\Infolists\Components\TextEntry;
 
 class QuizControlPanel extends Page
 {
@@ -25,7 +27,9 @@ class QuizControlPanel extends Page
 
     protected string $view = 'filament.pages.quiz-control-panel';
 
-    public $quizState;
+    // 1. INI KUNCI AGAR TOMBOL BERFUNGSI: Tambahkan ?QuizState
+    // Agar Livewire 3 tidak mengubah model ini menjadi array saat tombol diklik
+    public ?QuizState $quizState = null;
 
     public function mount()
     {
@@ -35,17 +39,17 @@ class QuizControlPanel extends Page
         );
     }
 
-    // --- INFOLIST BAWAAN FILAMENT ---
-    public function quizInfolist(Infolist $infolist): Infolist
+    // 2. SETTING BARCODE DI BELAKANG LAYAR (Dalam Infolist)
+    // Perbaikan: Gunakan Infolist (bukan Schema) sebagai parameternya
+    public function quizInfolist(Schema $infolist): Schema
     {
         return $infolist
-            ->record($this->quizState)
-            ->schema([
+            ->record($this->quizState) 
+            ->components([
                 Section::make('Informasi & Akses Kuis')
                     ->description('Pantau status saat ini dan dapatkan tautan kontrol untuk panitia lapangan.')
                     ->icon('heroicon-o-information-circle')
                     ->schema([
-                        // Tampilan Status dengan Badge
                         TextEntry::make('status')
                             ->label('Status Kuis Saat Ini')
                             ->badge()
@@ -62,36 +66,31 @@ class QuizControlPanel extends Page
                                 default => strtoupper($state),
                             }),
 
-                        // Tampilan Link Monitor
                         TextEntry::make('monitor_token')
                             ->label('Link Monitor Panitia (Rahasia)')
                             ->formatStateUsing(fn (string $state) => url('/monitor/' . $state))
                             ->copyable()
-                            ->copyMessage('Link berhasil disalin ke clipboard!')
-                            ->copyMessageDuration(1500)
-                            ->tooltip('Klik tautan ini untuk menyalin')
+                            ->copyMessage('Link disalin!')
                             ->color('primary')
                             ->weight('bold'),
                             
-                        // Tampilan QR Code untuk Peserta (Link Join)
+                        // PENAMBAHAN QR CODE (Menggunakan Google Chart API yang sangat ringan)
                         TextEntry::make('qr_code')
                             ->label('Barcode URL Peserta (Scan untuk Gabung)')
-                            ->default('https://evencapt.com') // Link yang Anda minta
-                            ->html() // Mengizinkan render HTML
+                            ->default('https://evencapt.com')
+                            ->html()
                             ->formatStateUsing(function (string $state) {
-                                // Menggunakan API Google Chart untuk generate QR dengan aman dan ringan
                                 $url = urlencode($state);
-                                return '<div class="mt-2 p-2 bg-white rounded-lg inline-block shadow-sm">
-                                            <img src="https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=' . $url . '&choe=UTF-8" alt="QR Code Evencapt" class="w-48 h-48 border border-gray-200 rounded"/>
-                                        </div>
-                                        <p class="mt-2 text-sm font-bold text-gray-700">Arahkan peserta ke: <a href="https://evencapt.com" target="_blank" class="text-primary-600 underline">evencapt.com</a></p>';
+                                return '<div class="mt-2">
+                                            <img src="https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=' . $url . '&choe=UTF-8" alt="QR Code Evencapt" class="w-48 h-48 border border-gray-200 rounded-lg shadow-sm"/>
+                                            <p class="mt-2 text-sm font-bold text-gray-700">Arahkan peserta ke: <a href="' . $state . '" target="_blank" class="text-primary-600 underline">evencapt.com</a></p>
+                                        </div>';
                             }),
                     ])
-                    ->columns(1),
+                    ->columns(1), 
             ]);
     }
 
-    // --- HEADER ACTIONS (TOMBOL KONTROL) ---
     protected function getHeaderActions(): array
     {
         return [
@@ -119,7 +118,7 @@ class QuizControlPanel extends Page
                 ->icon('heroicon-o-trash')
                 ->requiresConfirmation()
                 ->modalHeading('Hapus Semua Data Peserta?')
-                ->modalDescription('PERINGATAN: Semua data peserta, jawaban, dan skor akan dihapus permanen ke 0. Gunakan hanya setelah uji coba (gladi resik) selesai.')
+                ->modalDescription('Semua data akan dihapus permanen. Lanjutkan?')
                 ->action(function () {
                     DB::statement('SET FOREIGN_KEY_CHECKS=0;');
                     Answer::truncate();
@@ -129,7 +128,7 @@ class QuizControlPanel extends Page
                     $this->changeStatus('waiting');
                     $this->quizState->update(['monitor_token' => Str::random(10)]);
                     
-                    Notification::make()
+                    \Filament\Notifications\Notification::make()
                         ->title('Data berhasil di-reset!')
                         ->success()
                         ->send();
@@ -145,6 +144,7 @@ class QuizControlPanel extends Page
              $this->quizState->update(['started_at' => now()]);
         }
         
+        // Memaksa Livewire/Filament untuk me-refresh data tampilan
         $this->quizState->refresh();
     }
 }
